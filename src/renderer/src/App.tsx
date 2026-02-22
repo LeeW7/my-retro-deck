@@ -3,21 +3,28 @@ import type { Platform } from '../../shared/types'
 
 function getGridClass(count: number): string {
   if (count <= 4) return 'grid-cols-2'
-  if (count <= 9) return 'grid-cols-3'
-  if (count <= 16) return 'grid-cols-4'
-  return 'grid-cols-5'
+  return 'grid-cols-3'
 }
 
 function App(): React.JSX.Element {
   const [platforms, setPlatforms] = useState<Platform[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [activePlatformId, setActivePlatformId] = useState<string | null>(null)
+  const [failedImages, setFailedImages] = useState<Set<string>>(new Set())
 
   useEffect(() => {
-    window.api.getPlatforms().then((result) => {
-      setPlatforms(result)
-      setLoading(false)
-    })
+    window.api
+      .getPlatforms()
+      .then((result) => {
+        setPlatforms(result)
+        setLoading(false)
+      })
+      .catch((err) => {
+        console.error('[RetroDeck] Failed to load platforms:', err)
+        setError('Failed to load platforms')
+        setLoading(false)
+      })
   }, [])
 
   const handleLaunch = useCallback((platform: Platform) => {
@@ -62,6 +69,14 @@ function App(): React.JSX.Element {
     )
   }
 
+  if (error) {
+    return (
+      <div className="h-screen w-screen bg-slate-900 flex items-center justify-center">
+        <span className="text-red-400 text-2xl font-bold tracking-widest">{error}</span>
+      </div>
+    )
+  }
+
   const gridClass = getGridClass(platforms.length)
 
   return (
@@ -71,7 +86,7 @@ function App(): React.JSX.Element {
           onClick={handleHome}
           disabled={activePlatformId !== null}
           className={`
-            px-4 py-1.5 rounded-full text-xs font-bold tracking-wider uppercase transition-all duration-200
+            px-4 py-2.5 rounded-full text-sm font-bold tracking-wider uppercase transition-all duration-200
             border-2 border-cyan-400/50
             ${activePlatformId === '__home__'
               ? 'bg-cyan-400 text-slate-900'
@@ -92,7 +107,7 @@ function App(): React.JSX.Element {
             onClick={handleKillAll}
             disabled={activePlatformId !== null}
             className="
-              px-4 py-1.5 rounded-full text-xs font-bold tracking-wider uppercase transition-all duration-200
+              px-4 py-2.5 rounded-full text-sm font-bold tracking-wider uppercase transition-all duration-200
               border-2 border-red-500/50 bg-slate-800 text-red-400
               hover:border-red-400 hover:shadow-md hover:shadow-red-500/30
               disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer
@@ -104,7 +119,7 @@ function App(): React.JSX.Element {
             onClick={handleShutdown}
             disabled={activePlatformId !== null}
             className="
-              px-4 py-1.5 rounded-full text-xs font-bold tracking-wider uppercase transition-all duration-200
+              px-4 py-2.5 rounded-full text-sm font-bold tracking-wider uppercase transition-all duration-200
               border-2 border-red-700/50 bg-slate-800 text-red-500
               hover:border-red-600 hover:shadow-md hover:shadow-red-700/30
               disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer
@@ -125,7 +140,7 @@ function App(): React.JSX.Element {
               onClick={() => handleLaunch(platform)}
               disabled={activePlatformId !== null}
               className={`
-                relative overflow-hidden rounded-lg border-2 transition-all duration-200 min-h-[120px]
+                relative overflow-hidden rounded-lg border-2 transition-all duration-200 min-h-[140px]
                 ${isActive
                   ? 'border-cyan-300 shadow-lg shadow-cyan-500/50'
                   : 'border-cyan-400/50 hover:border-cyan-400 hover:shadow-md hover:shadow-cyan-500/30'
@@ -135,11 +150,12 @@ function App(): React.JSX.Element {
                 flex items-center justify-center
               `}
             >
-              {platform.imageUrl ? (
+              {platform.imageUrl && !failedImages.has(platform.id) ? (
                 <img
                   src={platform.imageUrl}
                   alt={platform.name}
                   className="max-h-full max-w-[90%] object-contain p-3"
+                  onError={() => setFailedImages((prev) => new Set(prev).add(platform.id))}
                 />
               ) : (
                 <span className="text-white font-bold text-lg text-center px-3">

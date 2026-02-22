@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, protocol, net } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, protocol, net, screen } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -13,6 +13,25 @@ const isWindows = os.platform() === 'win32'
 const BIGBOX_PATH = 'C:\\LaunchBox\\BigBox.exe'
 
 const KILL_TARGETS = ['BigBox.exe', 'LaunchBox.exe', 'retroarch.exe', 'dolphin.exe', 'xemu.exe', 'pcsx2.exe']
+
+let mainWindow: BrowserWindow | null = null
+let allowClose = false
+let secondaryDisplay: Electron.Display | null = null
+
+function findSmallestDisplay(): Electron.Display | null {
+  const displays = screen.getAllDisplays()
+  if (displays.length <= 1) return null
+  return displays.reduce((smallest, d) =>
+    d.size.width * d.size.height < smallest.size.width * smallest.size.height ? d : smallest
+  )
+}
+
+function findLargestDisplay(): Electron.Display {
+  const displays = screen.getAllDisplays()
+  return displays.reduce((largest, d) =>
+    d.size.width * d.size.height > largest.size.width * largest.size.height ? d : largest
+  )
+}
 
 function killProcesses(): Promise<void> {
   return new Promise((resolve) => {
@@ -39,6 +58,14 @@ function killProcesses(): Promise<void> {
   })
 }
 
+function recoverFocus(): void {
+  if (!mainWindow) return
+  console.log('[Focus] Recovering focus to Retro Deck')
+  mainWindow.show()
+  mainWindow.focus()
+  if (isWindows) app.focus()
+}
+
 function launchPlatform(platform: Platform): void {
   if (!isWindows) {
     console.log(`[Dev Mode] Would set LastPlatform to: ${platform.name}`)
@@ -55,13 +82,15 @@ function launchPlatform(platform: Platform): void {
   exec(command, (error) => {
     if (error) {
       console.error(`[Launch] Failed to start BigBox:`, error.message)
-      return
+    } else {
+      console.log(`[Launch] BigBox exited for ${platform.name}`)
     }
-    console.log(`[Launch] BigBox started for ${platform.name}`)
+    recoverFocus()
   })
 
   setTimeout(() => {
-    const nircmd = 'nircmd win setsize foreground 0 0 3840 2160'
+    const { x, y, width, height } = findLargestDisplay().bounds
+    const nircmd = `nircmd win setsize foreground ${x} ${y} ${width} ${height}`
     console.log(`[Window] Moving BigBox to Display 1: ${nircmd}`)
     exec(nircmd, (error) => {
       if (error) {
@@ -74,7 +103,7 @@ function launchPlatform(platform: Platform): void {
 }
 
 function createWindow(): void {
-  const mainWindow = new BrowserWindow({
+  const windowOptions: Electron.BrowserWindowConstructorOptions = {
     width: 900,
     height: 670,
     show: false,
@@ -84,10 +113,26 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false
     }
-  })
+  }
+
+  if (secondaryDisplay) {
+    windowOptions.x = secondaryDisplay.bounds.x
+    windowOptions.y = secondaryDisplay.bounds.y
+    windowOptions.fullscreen = true
+  } else if (isWindows) {
+    windowOptions.fullscreen = true
+  }
+
+  mainWindow = new BrowserWindow(windowOptions)
+
+  if (isWindows) {
+    mainWindow.on('close', (e) => {
+      if (!allowClose) e.preventDefault()
+    })
+  }
 
   mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
+    mainWindow!.show()
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -104,6 +149,13 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.electron')
+
+  secondaryDisplay = findSmallestDisplay()
+  console.log(
+    secondaryDisplay
+      ? `[Display] Retro Deck target: ${secondaryDisplay.size.width}x${secondaryDisplay.size.height} at (${secondaryDisplay.bounds.x},${secondaryDisplay.bounds.y})`
+      : '[Display] Single display detected, using default'
+  )
 
   protocol.handle('retro-asset', (request) => {
     const filePath = request.url.replace('retro-asset://', '')
@@ -142,13 +194,15 @@ app.whenReady().then(() => {
     exec(command, (error) => {
       if (error) {
         console.error('[Launch] Failed to start BigBox:', error.message)
-        return
+      } else {
+        console.log('[Launch] BigBox exited (home/all games)')
       }
-      console.log('[Launch] BigBox started (home/all games)')
+      recoverFocus()
     })
 
     setTimeout(() => {
-      const nircmd = 'nircmd win setsize foreground 0 0 3840 2160'
+      const { x, y, width, height } = findLargestDisplay().bounds
+      const nircmd = `nircmd win setsize foreground ${x} ${y} ${width} ${height}`
       console.log(`[Window] Moving BigBox to Display 1: ${nircmd}`)
       exec(nircmd, (error) => {
         if (error) {
@@ -168,6 +222,7 @@ app.whenReady().then(() => {
   ipcMain.on('shutdown', async () => {
     console.log('[Retro Deck] Shutting down system')
     await killProcesses()
+    allowClose = true
 
     if (!isWindows) {
       console.log('[Dev Mode] Would shutdown the system')
@@ -183,7 +238,28 @@ app.whenReady().then(() => {
     })
   })
 
+  if (isWindows) {
+    app.setLoginItemSettings({ openAtLogin: true })
+  }
+
   createWindow()
+
+  function repositionWindow(): void {
+    if (!mainWindow) return
+    const target = findSmallestDisplay()
+    if (target) {
+      mainWindow.setBounds(target.bounds)
+      mainWindow.setFullScreen(true)
+    }
+    console.log(
+      target
+        ? `[Display] Repositioned to: ${target.size.width}x${target.size.height}`
+        : '[Display] Single display, no repositioning needed'
+    )
+  }
+
+  screen.on('display-added', repositionWindow)
+  screen.on('display-removed', repositionWindow)
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

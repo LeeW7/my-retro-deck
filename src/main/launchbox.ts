@@ -2,6 +2,7 @@ import { XMLParser, XMLBuilder } from 'fast-xml-parser'
 import { readFileSync, writeFileSync, existsSync, readdirSync } from 'fs'
 import { join } from 'path'
 import type { Platform } from '../shared/types'
+import { findBundledIcon } from './platform-icons'
 
 const LAUNCHBOX_DIR = 'C:\\LaunchBox'
 
@@ -42,40 +43,46 @@ export function scanPlatforms(): Platform[] {
     return []
   }
 
-  const xml = readFileSync(platformsFile, 'utf-8')
-  const parsed = xmlParser.parse(xml)
+  try {
+    const xml = readFileSync(platformsFile, 'utf-8')
+    const parsed = xmlParser.parse(xml)
 
-  if (!parsed?.LaunchBox?.Platform) {
-    console.error('[LaunchBox] No platforms found in Platforms.xml')
+    if (!parsed?.LaunchBox?.Platform) {
+      console.error('[LaunchBox] No platforms found in Platforms.xml')
+      return []
+    }
+
+    const rawPlatforms = parsed.LaunchBox.Platform
+    const platformList = Array.isArray(rawPlatforms) ? rawPlatforms : [rawPlatforms]
+
+    const platforms: Platform[] = []
+
+    for (const p of platformList) {
+      const name = p.Name as string
+      if (!name) continue
+
+      const gameCount = countGames(name)
+      if (gameCount === 0) continue
+
+      const bundledPath = findBundledIcon(name)
+      const logoPath = bundledPath || findClearLogo(name)
+      const imageUrl = logoPath ? `retro-asset://${logoPath.replace(/\\/g, '/')}` : ''
+
+      platforms.push({
+        id: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+        name,
+        imageUrl,
+        gameCount
+      })
+    }
+
+    platforms.sort((a, b) => a.name.localeCompare(b.name))
+    console.log(`[LaunchBox] Found ${platforms.length} platforms with games`)
+    return platforms
+  } catch (err) {
+    console.error('[LaunchBox] Failed to scan platforms:', err)
     return []
   }
-
-  const rawPlatforms = parsed.LaunchBox.Platform
-  const platformList = Array.isArray(rawPlatforms) ? rawPlatforms : [rawPlatforms]
-
-  const platforms: Platform[] = []
-
-  for (const p of platformList) {
-    const name = p.Name as string
-    if (!name) continue
-
-    const gameCount = countGames(name)
-    if (gameCount === 0) continue
-
-    const logoPath = findClearLogo(name)
-    const imageUrl = logoPath ? `retro-asset://${logoPath.replace(/\\/g, '/')}` : ''
-
-    platforms.push({
-      id: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-      name,
-      imageUrl,
-      gameCount
-    })
-  }
-
-  platforms.sort((a, b) => a.name.localeCompare(b.name))
-  console.log(`[LaunchBox] Found ${platforms.length} platforms with games`)
-  return platforms
 }
 
 export function setLastPlatform(platformName: string): void {
