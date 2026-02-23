@@ -1,21 +1,29 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import type { Platform } from '../shared/types'
+import type { CompanionState, GameInfo } from '../shared/types'
 
 const api = {
-  getPlatforms: (): Promise<Platform[]> => ipcRenderer.invoke('get-platforms'),
-  launchPlatform: (platform: Platform): void => {
-    ipcRenderer.send('launch-platform', platform)
+  getDevMode: (): Promise<boolean> => ipcRenderer.invoke('get-dev-mode'),
+
+  getCompanionState: (): Promise<CompanionState> => ipcRenderer.invoke('get-companion-state'),
+
+  onCompanionStateChanged: (callback: (state: CompanionState) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: CompanionState): void => {
+      callback(state)
+    }
+    ipcRenderer.on('companion-state-changed', handler)
+    return () => ipcRenderer.removeListener('companion-state-changed', handler)
   },
-  launchHome: (): void => {
-    ipcRenderer.send('launch-home')
+
+  closeGame: (): void => {
+    ipcRenderer.send('close-game')
   },
-  killAll: (): void => {
-    ipcRenderer.send('kill-all')
+
+  simulateGame: (game: GameInfo | null): void => {
+    ipcRenderer.send('simulate-game', game)
   },
-  shutdown: (): void => {
-    ipcRenderer.send('shutdown')
-  }
+
+  getMockGames: (): Promise<GameInfo[]> => ipcRenderer.invoke('get-mock-games')
 }
 
 if (process.contextIsolated) {

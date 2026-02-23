@@ -1,132 +1,187 @@
-import { XMLParser, XMLBuilder } from 'fast-xml-parser'
-import { readFileSync, writeFileSync, existsSync, readdirSync } from 'fs'
-import { join } from 'path'
-import type { Platform } from '../shared/types'
-import { findBundledIcon } from './platform-icons'
+import { XMLParser } from 'fast-xml-parser'
+import { readFileSync, existsSync, readdirSync } from 'fs'
+import { join, basename } from 'path'
+import type { GameInfo, GameImages } from '../shared/types'
 
-const LAUNCHBOX_DIR = 'C:\\LaunchBox'
+export const LAUNCHBOX_DIR = 'C:\\Users\\acewa\\LaunchBox'
 
 const xmlParser = new XMLParser({ ignoreAttributes: false })
 
-function findClearLogo(platformName: string): string {
-  const logosDir = join(LAUNCHBOX_DIR, 'Images', platformName, 'Clear Logo')
-  if (!existsSync(logosDir)) return ''
+const IMAGE_EXTENSIONS = /\.(png|jpg|jpeg|gif|webp)$/i
 
-  const files = readdirSync(logosDir).filter((f) =>
-    /\.(png|jpg|jpeg|gif|webp)$/i.test(f)
-  )
-  if (files.length === 0) return ''
-
-  return join(logosDir, files[0])
+function toAssetUrl(filePath: string): string {
+  return `retro-asset:///${filePath.replace(/\\/g, '/')}`
 }
 
-function countGames(platformName: string): number {
-  const platformFile = join(LAUNCHBOX_DIR, 'Data', 'Platforms', `${platformName}.xml`)
-  if (!existsSync(platformFile)) return 0
-
-  try {
-    const xml = readFileSync(platformFile, 'utf-8')
-    const parsed = xmlParser.parse(xml)
-
-    if (!parsed?.LaunchBox?.Game) return 0
-    const games = parsed.LaunchBox.Game
-    return Array.isArray(games) ? games.length : 1
-  } catch {
-    return 0
-  }
+function normalizePath(p: string): string {
+  return p.replace(/\\/g, '/').toLowerCase()
 }
 
-export function scanPlatforms(): Platform[] {
-  const platformsFile = join(LAUNCHBOX_DIR, 'Data', 'Platforms.xml')
-  if (!existsSync(platformsFile)) {
-    console.error('[LaunchBox] Platforms.xml not found at', platformsFile)
-    return []
-  }
+// --- Game Index ---
 
-  try {
-    const xml = readFileSync(platformsFile, 'utf-8')
-    const parsed = xmlParser.parse(xml)
+interface RawGame {
+  ID?: string
+  Title?: string
+  Platform?: string
+  ApplicationPath?: string
+  Developer?: string
+  Publisher?: string
+  Genre?: string
+  ReleaseDate?: string
+  Rating?: string
+  PlayMode?: string
+  PlayCount?: number
+  PlayTime?: number
+}
 
-    if (!parsed?.LaunchBox?.Platform) {
-      console.error('[LaunchBox] No platforms found in Platforms.xml')
-      return []
-    }
-
-    const rawPlatforms = parsed.LaunchBox.Platform
-    const platformList = Array.isArray(rawPlatforms) ? rawPlatforms : [rawPlatforms]
-
-    const platforms: Platform[] = []
-
-    for (const p of platformList) {
-      const name = p.Name as string
-      if (!name) continue
-
-      const gameCount = countGames(name)
-      if (gameCount === 0) continue
-
-      const bundledPath = findBundledIcon(name)
-      const logoPath = bundledPath || findClearLogo(name)
-      const imageUrl = logoPath ? `retro-asset://${logoPath.replace(/\\/g, '/')}` : ''
-
-      platforms.push({
-        id: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-        name,
-        imageUrl,
-        gameCount
-      })
-    }
-
-    platforms.sort((a, b) => a.name.localeCompare(b.name))
-    console.log(`[LaunchBox] Found ${platforms.length} platforms with games`)
-    return platforms
-  } catch (err) {
-    console.error('[LaunchBox] Failed to scan platforms:', err)
-    return []
+function parseGameEntry(raw: RawGame, platform: string): GameInfo {
+  const appPath = (raw.ApplicationPath as string) || ''
+  return {
+    id: (raw.ID as string) || '',
+    title: (raw.Title as string) || '',
+    platform: (raw.Platform as string) || platform,
+    applicationPath: appPath,
+    developer: (raw.Developer as string) || '',
+    publisher: (raw.Publisher as string) || '',
+    genre: (raw.Genre as string) || '',
+    releaseDate: (raw.ReleaseDate as string) || '',
+    rating: (raw.Rating as string) || '',
+    playMode: (raw.PlayMode as string) || '',
+    playCount: Number(raw.PlayCount) || 0,
+    playTime: Number(raw.PlayTime) || 0,
+    images: { boxFront: '', screenshot: '', clearLogo: '', fanartBackground: '' }
   }
 }
 
-export function setLastPlatform(platformName: string): void {
-  const settingsPath = join(LAUNCHBOX_DIR, 'Data', 'BigBoxSettings.xml')
-  if (!existsSync(settingsPath)) {
-    console.error('[LaunchBox] BigBoxSettings.xml not found at', settingsPath)
-    return
+export function buildGameIndex(): Map<string, GameInfo> {
+  const index = new Map<string, GameInfo>()
+  const platformsDir = join(LAUNCHBOX_DIR, 'Data', 'Platforms')
+
+  if (!existsSync(platformsDir)) {
+    console.error('[LaunchBox] Platforms directory not found at', platformsDir)
+    return index
   }
 
-  const xml = readFileSync(settingsPath, 'utf-8')
-  const parser = new XMLParser({ ignoreAttributes: false, preserveOrder: true })
-  const builder = new XMLBuilder({ ignoreAttributes: false, preserveOrder: true, format: true })
+  const xmlFiles = readdirSync(platformsDir).filter((f) => f.endsWith('.xml'))
 
-  const parsed = parser.parse(xml)
+  for (const file of xmlFiles) {
+    const platformName = file.replace('.xml', '')
+    try {
+      const xml = readFileSync(join(platformsDir, file), 'utf-8')
+      const parsed = xmlParser.parse(xml)
 
-  function setField(obj: unknown, fieldName: string, value: string): boolean {
-    if (!Array.isArray(obj)) return false
-    for (const node of obj) {
-      if (node[fieldName] !== undefined) {
-        if (Array.isArray(node[fieldName]) && node[fieldName].length > 0) {
-          node[fieldName][0]['#text'] = value
-        } else {
-          node[fieldName] = [{ '#text': value }]
-        }
-        return true
-      }
-      for (const key of Object.keys(node)) {
-        if (key !== ':@' && Array.isArray(node[key])) {
-          if (setField(node[key], fieldName, value)) return true
+      if (!parsed?.LaunchBox?.Game) continue
+      const rawGames = Array.isArray(parsed.LaunchBox.Game)
+        ? parsed.LaunchBox.Game
+        : [parsed.LaunchBox.Game]
+
+      for (const raw of rawGames) {
+        const game = parseGameEntry(raw as RawGame, platformName)
+        if (!game.applicationPath) continue
+
+        // Key by normalized absolute path
+        const absolutePath = join(LAUNCHBOX_DIR, game.applicationPath)
+        const key = normalizePath(absolutePath)
+        index.set(key, game)
+
+        // Also key by filename for fallback matching
+        const filename = normalizePath(basename(game.applicationPath))
+        if (!index.has(filename)) {
+          index.set(filename, game)
         }
       }
+    } catch (err) {
+      console.error(`[LaunchBox] Failed to parse ${file}:`, err)
     }
-    return false
   }
 
-  setField(parsed, 'LastPlatform', platformName)
-
-  const updatedXml = builder.build(parsed)
-  writeFileSync(settingsPath, updatedXml, 'utf-8')
-  console.log(`[LaunchBox] Set LastPlatform to "${platformName}"`)
+  console.log(`[LaunchBox] Indexed ${index.size} game entries`)
+  return index
 }
 
-export function resolveAssetPath(url: string): string {
-  // url format: retro-asset://C:/LaunchBox/Images/...
-  const filePath = url.replace('retro-asset://', '')
-  return filePath
+export function lookupGameByRomPath(
+  romPath: string,
+  index: Map<string, GameInfo>
+): GameInfo | null {
+  // Try exact normalized path match
+  const normalizedFull = normalizePath(romPath)
+  const exact = index.get(normalizedFull)
+  if (exact) return exact
+
+  // Try with LAUNCHBOX_DIR prepended (in case romPath is relative)
+  const withBase = normalizePath(join(LAUNCHBOX_DIR, romPath))
+  const relative = index.get(withBase)
+  if (relative) return relative
+
+  // Fallback: match by filename only
+  const filename = normalizePath(basename(romPath))
+  const byName = index.get(filename)
+  if (byName) return byName
+
+  return null
+}
+
+// --- Game Images ---
+
+function findImageInDir(dir: string, titlePrefix: string): string {
+  if (!existsSync(dir)) return ''
+
+  const entries = readdirSync(dir, { withFileTypes: true })
+
+  // Check files in this directory first
+  for (const entry of entries) {
+    if (entry.isFile() && IMAGE_EXTENSIONS.test(entry.name)) {
+      if (entry.name.toLowerCase().startsWith(titlePrefix)) {
+        return join(dir, entry.name)
+      }
+    }
+  }
+
+  // Check subdirectories (region folders like North America, World, etc.)
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      const subDir = join(dir, entry.name)
+      try {
+        const subFiles = readdirSync(subDir).filter((f) => IMAGE_EXTENSIONS.test(f))
+        for (const f of subFiles) {
+          if (f.toLowerCase().startsWith(titlePrefix)) {
+            return join(subDir, f)
+          }
+        }
+      } catch {
+        // Skip inaccessible subdirectories
+      }
+    }
+  }
+
+  return ''
+}
+
+export function resolveGameImages(title: string, platform: string): GameImages {
+  const imagesBase = join(LAUNCHBOX_DIR, 'Images', platform)
+  const titlePrefix = title.toLowerCase()
+
+  const imageTypes: Array<{ key: keyof GameImages; folder: string }> = [
+    { key: 'boxFront', folder: 'Box - Front' },
+    { key: 'screenshot', folder: 'Screenshot - Gameplay' },
+    { key: 'clearLogo', folder: 'Clear Logo' },
+    { key: 'fanartBackground', folder: 'Fanart - Background' }
+  ]
+
+  const images: GameImages = {
+    boxFront: '',
+    screenshot: '',
+    clearLogo: '',
+    fanartBackground: ''
+  }
+
+  for (const { key, folder } of imageTypes) {
+    const dir = join(imagesBase, folder)
+    const found = findImageInDir(dir, titlePrefix)
+    if (found) {
+      images[key] = toAssetUrl(found)
+    }
+  }
+
+  return images
 }

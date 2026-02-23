@@ -1,15 +1,16 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
-import type { Platform } from '../shared/types'
+import type { CompanionState, GameInfo } from '../shared/types'
 
 declare global {
   interface Window {
     electron: ElectronAPI
     api: {
-      getPlatforms: () => Promise<Platform[]>
-      launchPlatform: (platform: Platform) => void
-      launchHome: () => void
-      killAll: () => void
-      shutdown: () => void
+      getDevMode: () => Promise<boolean>
+      getCompanionState: () => Promise<CompanionState>
+      onCompanionStateChanged: (callback: (state: CompanionState) => void) => () => void
+      closeGame: () => void
+      simulateGame: (game: GameInfo | null) => void
+      getMockGames: () => Promise<GameInfo[]>
     }
   }
 }

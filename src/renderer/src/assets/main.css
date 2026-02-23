@@ -2,6 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-* {
+.hide-cursor,
+.hide-cursor * {
   cursor: none !important;
 }

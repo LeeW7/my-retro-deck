@@ -4,15 +4,19 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { exec } from 'child_process'
 import os from 'os'
-import type { Platform } from '../shared/types'
-import { scanPlatforms, setLastPlatform } from './launchbox'
-import { devPlatforms } from './dev-platforms'
+import type { CompanionState, GameInfo } from '../shared/types'
+import { buildGameIndex } from './launchbox'
+import {
+  startWatching,
+  stopWatching,
+  getCurrentState,
+  setCurrentState,
+  getActiveEmulatorProcess
+} from './game-watcher'
+import { mockGames } from './dev-mock-game'
 
 const isWindows = os.platform() === 'win32'
-
-const BIGBOX_PATH = 'C:\\LaunchBox\\BigBox.exe'
-
-const KILL_TARGETS = ['BigBox.exe', 'LaunchBox.exe', 'retroarch.exe', 'dolphin.exe', 'xemu.exe', 'pcsx2.exe']
+const devMode = !!process.env.DEV_MODE
 
 let mainWindow: BrowserWindow | null = null
 let allowClose = false
@@ -26,80 +30,12 @@ function findSmallestDisplay(): Electron.Display | null {
   )
 }
 
-function findLargestDisplay(): Electron.Display {
-  const displays = screen.getAllDisplays()
-  return displays.reduce((largest, d) =>
-    d.size.width * d.size.height > largest.size.width * largest.size.height ? d : largest
-  )
-}
-
-function killProcesses(): Promise<void> {
-  return new Promise((resolve) => {
-    if (!isWindows) {
-      console.log('[Dev Mode] Would kill:', KILL_TARGETS.join(', '))
-      resolve()
-      return
-    }
-
-    let completed = 0
-    for (const proc of KILL_TARGETS) {
-      exec(`taskkill /IM ${proc} /F`, (error) => {
-        if (error) {
-          console.log(`[Kill] ${proc} was not running`)
-        } else {
-          console.log(`[Kill] ${proc} terminated`)
-        }
-        completed++
-        if (completed === KILL_TARGETS.length) {
-          resolve()
-        }
-      })
-    }
-  })
-}
-
 function recoverFocus(): void {
   if (!mainWindow) return
   console.log('[Focus] Recovering focus to Retro Deck')
   mainWindow.show()
   mainWindow.focus()
   if (isWindows) app.focus()
-}
-
-function launchPlatform(platform: Platform): void {
-  if (!isWindows) {
-    console.log(`[Dev Mode] Would set LastPlatform to: ${platform.name}`)
-    console.log(`[Dev Mode] Would launch: ${BIGBOX_PATH}`)
-    console.log(`[Dev Mode] Would move BigBox to Display 1 after 2s`)
-    return
-  }
-
-  console.log(`[Launch] Setting LastPlatform to: ${platform.name}`)
-  setLastPlatform(platform.name)
-
-  const command = `"${BIGBOX_PATH}"`
-  console.log(`[Launch] Executing: ${command}`)
-  exec(command, (error) => {
-    if (error) {
-      console.error(`[Launch] Failed to start BigBox:`, error.message)
-    } else {
-      console.log(`[Launch] BigBox exited for ${platform.name}`)
-    }
-    recoverFocus()
-  })
-
-  setTimeout(() => {
-    const { x, y, width, height } = findLargestDisplay().bounds
-    const nircmd = `nircmd win setsize foreground ${x} ${y} ${width} ${height}`
-    console.log(`[Window] Moving BigBox to Display 1: ${nircmd}`)
-    exec(nircmd, (error) => {
-      if (error) {
-        console.error('[Window] Failed to move window:', error.message)
-      } else {
-        console.log('[Window] BigBox moved to Display 1')
-      }
-    })
-  }, 2000)
 }
 
 function createWindow(): void {
@@ -115,17 +51,19 @@ function createWindow(): void {
     }
   }
 
-  if (secondaryDisplay) {
-    windowOptions.x = secondaryDisplay.bounds.x
-    windowOptions.y = secondaryDisplay.bounds.y
-    windowOptions.fullscreen = true
-  } else if (isWindows) {
-    windowOptions.fullscreen = true
+  if (!devMode) {
+    if (secondaryDisplay) {
+      windowOptions.x = secondaryDisplay.bounds.x
+      windowOptions.y = secondaryDisplay.bounds.y
+      windowOptions.fullscreen = true
+    } else if (isWindows) {
+      windowOptions.fullscreen = true
+    }
   }
 
   mainWindow = new BrowserWindow(windowOptions)
 
-  if (isWindows) {
+  if (isWindows && !devMode) {
     mainWindow.on('close', (e) => {
       if (!allowClose) e.preventDefault()
     })
@@ -148,7 +86,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
-  electronApp.setAppUserModelId('com.electron')
+  electronApp.setAppUserModelId('com.retrodeck')
 
   secondaryDisplay = findSmallestDisplay()
   console.log(
@@ -158,7 +96,7 @@ app.whenReady().then(() => {
   )
 
   protocol.handle('retro-asset', (request) => {
-    const filePath = request.url.replace('retro-asset://', '')
+    const filePath = decodeURIComponent(request.url.replace('retro-asset:///', ''))
     return net.fetch(`file:///${filePath}`)
   })
 
@@ -166,81 +104,70 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  ipcMain.handle('get-platforms', () => {
-    if (!isWindows) {
-      console.log('[Dev Mode] Returning mock platforms')
-      return devPlatforms
-    }
-    return scanPlatforms()
-  })
+  if (devMode) {
+    console.log('[Dev Mode] Windowed mode enabled (DEV_MODE=1)')
+  }
 
-  ipcMain.on('launch-platform', async (_event, platform: Platform) => {
-    console.log(`[Retro Deck] Launching platform: ${platform.name}`)
-    await killProcesses()
-    launchPlatform(platform)
-  })
+  // --- Build game index ---
+  const gameIndex = buildGameIndex()
 
-  ipcMain.on('launch-home', async () => {
-    console.log('[Retro Deck] Launching BigBox home (all games)')
-    await killProcesses()
+  // --- IPC Handlers ---
+  ipcMain.handle('get-dev-mode', () => devMode)
+
+  ipcMain.handle('get-companion-state', () => getCurrentState())
+
+  ipcMain.on('close-game', () => {
+    const processName = getActiveEmulatorProcess()
 
     if (!isWindows) {
-      console.log(`[Dev Mode] Would launch: ${BIGBOX_PATH} (no platform override)`)
+      console.log(`[Dev Mode] Would kill ${processName || 'emulator'}`)
+      setCurrentState({ status: 'idle' })
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('companion-state-changed', getCurrentState())
+      }
       return
     }
 
-    const command = `"${BIGBOX_PATH}"`
-    console.log(`[Launch] Executing: ${command}`)
-    exec(command, (error) => {
+    if (!processName) {
+      console.log('[Close Game] No emulator process to kill')
+      return
+    }
+
+    exec(`taskkill /IM "${processName}" /F`, (error) => {
       if (error) {
-        console.error('[Launch] Failed to start BigBox:', error.message)
+        console.log(`[Close Game] ${processName} was not running`)
       } else {
-        console.log('[Launch] BigBox exited (home/all games)')
+        console.log(`[Close Game] ${processName} terminated`)
       }
       recoverFocus()
     })
-
-    setTimeout(() => {
-      const { x, y, width, height } = findLargestDisplay().bounds
-      const nircmd = `nircmd win setsize foreground ${x} ${y} ${width} ${height}`
-      console.log(`[Window] Moving BigBox to Display 1: ${nircmd}`)
-      exec(nircmd, (error) => {
-        if (error) {
-          console.error('[Window] Failed to move window:', error.message)
-        } else {
-          console.log('[Window] BigBox moved to Display 1')
-        }
-      })
-    }, 2000)
   })
 
-  ipcMain.on('kill-all', async () => {
-    console.log('[Retro Deck] Killing all processes (back to Retro Deck)')
-    await killProcesses()
-  })
+  // Dev mode: simulate game detection for UI testing
+  ipcMain.on('simulate-game', (_event, game: GameInfo | null) => {
+    if (!devMode && isWindows) return
 
-  ipcMain.on('shutdown', async () => {
-    console.log('[Retro Deck] Shutting down system')
-    await killProcesses()
-    allowClose = true
-
-    if (!isWindows) {
-      console.log('[Dev Mode] Would shutdown the system')
-      return
+    const state: CompanionState = game
+      ? { status: 'game-active', game, emulatorProcess: 'mock-emulator.exe' }
+      : { status: 'idle' }
+    setCurrentState(state)
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('companion-state-changed', state)
     }
-
-    exec('shutdown /s /t 5', (error) => {
-      if (error) {
-        console.error('[Shutdown] Failed to initiate shutdown:', error.message)
-      } else {
-        console.log('[Shutdown] System shutting down in 5 seconds')
-      }
-    })
   })
 
-  if (isWindows) {
-    app.setLoginItemSettings({ openAtLogin: true })
-  }
+  // Expose mock games for dev mode
+  ipcMain.handle('get-mock-games', () => {
+    if (!devMode && isWindows) return []
+    return mockGames
+  })
+
+  // --- Start game watcher ---
+  startWatching(gameIndex, (state) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('companion-state-changed', state)
+    }
+  })
 
   createWindow()
 
@@ -264,6 +191,11 @@ app.whenReady().then(() => {
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+})
+
+app.on('before-quit', () => {
+  allowClose = true
+  stopWatching()
 })
 
 app.on('window-all-closed', () => {

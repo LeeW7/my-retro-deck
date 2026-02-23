@@ -1,183 +1,240 @@
 import { useState, useEffect, useCallback } from 'react'
-import type { Platform } from '../../shared/types'
+import type { CompanionState, GameInfo } from '../../shared/types'
 
-function getGridClass(count: number): string {
-  if (count <= 4) return 'grid-cols-2'
-  return 'grid-cols-3'
+function formatPlayTime(seconds: number): string {
+  if (seconds === 0) return ''
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  if (hours > 0) return `${hours}h ${minutes}m`
+  return `${minutes}m`
 }
 
-function App(): React.JSX.Element {
-  const [platforms, setPlatforms] = useState<Platform[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [activePlatformId, setActivePlatformId] = useState<string | null>(null)
-  const [failedImages, setFailedImages] = useState<Set<string>>(new Set())
+function formatYear(dateStr: string): string {
+  if (!dateStr) return ''
+  const match = dateStr.match(/^\d{4}/)
+  return match ? match[0] : ''
+}
 
-  useEffect(() => {
-    window.api
-      .getPlatforms()
-      .then((result) => {
-        setPlatforms(result)
-        setLoading(false)
-      })
-      .catch((err) => {
-        console.error('[RetroDeck] Failed to load platforms:', err)
-        setError('Failed to load platforms')
-        setLoading(false)
-      })
-  }, [])
+function IdleView(): React.JSX.Element {
+  return (
+    <div className="h-full flex flex-col items-center justify-center gap-6">
+      <h1 className="text-cyan-400 text-3xl font-bold tracking-widest uppercase">Retro Deck</h1>
+      <div className="w-16 h-0.5 bg-cyan-400/30 rounded-full" />
+      <span className="text-slate-500 text-lg font-medium tracking-wider uppercase animate-pulse">
+        Waiting for game...
+      </span>
+    </div>
+  )
+}
 
-  const handleLaunch = useCallback((platform: Platform) => {
-    if (activePlatformId) return
+function ActiveGameView({
+  game,
+  onCloseGame
+}: {
+  game: GameInfo
+  onCloseGame: () => void
+}): React.JSX.Element {
+  const [imgError, setImgError] = useState(false)
+  const year = formatYear(game.releaseDate)
+  const playTime = formatPlayTime(game.playTime)
 
-    setActivePlatformId(platform.id)
-    window.api.launchPlatform(platform)
+  const infoPills: string[] = []
+  if (game.developer) infoPills.push(game.developer)
+  if (game.genre) infoPills.push(game.genre.split(';')[0].trim())
+  if (year) infoPills.push(year)
+  if (game.rating) infoPills.push(game.rating)
 
-    setTimeout(() => {
-      setActivePlatformId(null)
-    }, 3000)
-  }, [activePlatformId])
-
-  const handleHome = useCallback(() => {
-    if (activePlatformId) return
-
-    setActivePlatformId('__home__')
-    window.api.launchHome()
-
-    setTimeout(() => {
-      setActivePlatformId(null)
-    }, 3000)
-  }, [activePlatformId])
-
-  const handleKillAll = useCallback(() => {
-    if (activePlatformId) return
-    window.api.killAll()
-  }, [activePlatformId])
-
-  const handleShutdown = useCallback(() => {
-    if (activePlatformId) return
-    window.api.shutdown()
-  }, [activePlatformId])
-
-  if (loading) {
-    return (
-      <div className="h-screen w-screen bg-slate-900 flex items-center justify-center">
-        <span className="text-cyan-400 text-2xl font-bold tracking-widest animate-pulse">
-          SCANNING PLATFORMS...
-        </span>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="h-screen w-screen bg-slate-900 flex items-center justify-center">
-        <span className="text-red-400 text-2xl font-bold tracking-widest">{error}</span>
-      </div>
-    )
-  }
-
-  const gridClass = getGridClass(platforms.length)
+  const hasBoxArt = game.images.boxFront && !imgError
+  const hasClearLogo = game.images.clearLogo && !imgError
+  const hasAnyImage = hasBoxArt || hasClearLogo
 
   return (
-    <div className="h-screen w-screen bg-slate-900 p-4 flex flex-col">
-      <div className="flex items-center justify-between mb-4">
-        <button
-          onClick={handleHome}
-          disabled={activePlatformId !== null}
-          className={`
-            px-4 py-2.5 rounded-full text-sm font-bold tracking-wider uppercase transition-all duration-200
-            border-2 border-cyan-400/50
-            ${activePlatformId === '__home__'
-              ? 'bg-cyan-400 text-slate-900'
-              : 'bg-slate-800 text-cyan-400 hover:border-cyan-400 hover:shadow-md hover:shadow-cyan-500/30'
-            }
-            disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer
-          `}
-        >
-          All Games
-        </button>
+    <div className="h-full flex flex-col relative overflow-hidden">
+      {/* Background — fanart if available, otherwise subtle gradient */}
+      {game.images.fanartBackground ? (
+        <div
+          className="absolute inset-0 bg-cover bg-center blur-sm opacity-20 scale-105"
+          style={{ backgroundImage: `url("${game.images.fanartBackground}")` }}
+        />
+      ) : (
+        <div className="absolute inset-0 bg-gradient-to-b from-slate-800/50 via-slate-900 to-slate-900" />
+      )}
 
-        <h1 className="text-cyan-400 text-2xl font-bold tracking-widest text-center uppercase">
-          Retro Deck
-        </h1>
+      {/* Content overlay */}
+      <div className="relative z-10 flex flex-col h-full p-6">
+        {/* Header */}
+        <div className="text-center mb-3">
+          <span className="text-cyan-400/60 text-xs font-bold tracking-widest uppercase">
+            Now Playing
+          </span>
+        </div>
 
-        <div className="flex items-center gap-2">
+        {/* Box Art / Title Display */}
+        <div className="flex-1 flex items-center justify-center min-h-0 mb-4">
+          {hasBoxArt ? (
+            <img
+              src={game.images.boxFront}
+              alt={game.title}
+              className="max-h-full max-w-[80%] object-contain rounded-lg shadow-2xl shadow-cyan-500/20"
+              onError={() => setImgError(true)}
+            />
+          ) : hasClearLogo ? (
+            <img
+              src={game.images.clearLogo}
+              alt={game.title}
+              className="max-h-[60%] max-w-[80%] object-contain"
+              onError={() => setImgError(true)}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center gap-4">
+              <div className="w-20 h-0.5 bg-cyan-400/20 rounded-full" />
+              <h2 className="text-cyan-400 text-3xl font-bold text-center tracking-wide leading-snug px-8">
+                {game.title}
+              </h2>
+              <span className="text-slate-400 text-sm font-medium tracking-wider uppercase">
+                {game.platform}
+              </span>
+              <div className="w-20 h-0.5 bg-cyan-400/20 rounded-full" />
+            </div>
+          )}
+        </div>
+
+        {/* Game Info — only show title/platform here if we have an image above */}
+        {hasAnyImage && (
+          <div className="text-center space-y-1 mb-3">
+            <h2 className="text-cyan-400 text-xl font-bold tracking-wide">{game.title}</h2>
+            <span className="text-slate-400 text-sm font-medium tracking-wider uppercase">
+              {game.platform}
+            </span>
+          </div>
+        )}
+
+        {/* Info Pills */}
+        {infoPills.length > 0 && (
+          <div className="flex flex-wrap justify-center gap-2 mb-3">
+            {infoPills.map((pill) => (
+              <span
+                key={pill}
+                className="px-3 py-1 rounded-full text-xs font-medium bg-slate-800 text-slate-300 border border-slate-600/50"
+              >
+                {pill}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Play Stats */}
+        {(game.playCount > 0 || playTime) && (
+          <div className="flex justify-center gap-4 mb-4 text-xs text-slate-400">
+            {game.playCount > 0 && (
+              <span>
+                Played {game.playCount} time{game.playCount !== 1 ? 's' : ''}
+              </span>
+            )}
+            {playTime && <span>{playTime} total</span>}
+          </div>
+        )}
+
+        {/* Action Bar */}
+        <div className="flex justify-center pt-1">
           <button
-            onClick={handleKillAll}
-            disabled={activePlatformId !== null}
+            onClick={onCloseGame}
             className="
-              px-4 py-2.5 rounded-full text-sm font-bold tracking-wider uppercase transition-all duration-200
+              px-6 py-2.5 rounded-full text-sm font-bold tracking-wider uppercase
+              transition-all duration-200 cursor-pointer
               border-2 border-red-500/50 bg-slate-800 text-red-400
               hover:border-red-400 hover:shadow-md hover:shadow-red-500/30
-              disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer
+              active:bg-red-500/20
             "
           >
-            Back
-          </button>
-          <button
-            onClick={handleShutdown}
-            disabled={activePlatformId !== null}
-            className="
-              px-4 py-2.5 rounded-full text-sm font-bold tracking-wider uppercase transition-all duration-200
-              border-2 border-red-700/50 bg-slate-800 text-red-500
-              hover:border-red-600 hover:shadow-md hover:shadow-red-700/30
-              disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer
-            "
-          >
-            Shutdown
+            Close Game
           </button>
         </div>
       </div>
+    </div>
+  )
+}
 
-      <div className={`grid ${gridClass} gap-4 flex-1 overflow-y-auto`}>
-        {platforms.map((platform) => {
-          const isActive = activePlatformId === platform.id
+function DevControls(): React.JSX.Element {
+  const [mockGames, setMockGames] = useState<GameInfo[]>([])
+  const [mockIndex, setMockIndex] = useState(0)
 
-          return (
-            <button
-              key={platform.id}
-              onClick={() => handleLaunch(platform)}
-              disabled={activePlatformId !== null}
-              className={`
-                relative overflow-hidden rounded-lg border-2 transition-all duration-200 min-h-[140px]
-                ${isActive
-                  ? 'border-cyan-300 shadow-lg shadow-cyan-500/50'
-                  : 'border-cyan-400/50 hover:border-cyan-400 hover:shadow-md hover:shadow-cyan-500/30'
-                }
-                ${activePlatformId && !isActive ? 'opacity-40' : ''}
-                bg-slate-800 cursor-pointer disabled:cursor-not-allowed
-                flex items-center justify-center
-              `}
-            >
-              {platform.imageUrl && !failedImages.has(platform.id) ? (
-                <img
-                  src={platform.imageUrl}
-                  alt={platform.name}
-                  className="max-h-full max-w-[90%] object-contain p-3"
-                  onError={() => setFailedImages((prev) => new Set(prev).add(platform.id))}
-                />
-              ) : (
-                <span className="text-white font-bold text-lg text-center px-3">
-                  {platform.name}
-                </span>
-              )}
+  useEffect(() => {
+    window.api.getMockGames().then(setMockGames)
+  }, [])
 
-              <div className="absolute bottom-1 right-2">
-                <span className="text-cyan-400/60 text-xs">{platform.gameCount} games</span>
-              </div>
+  return (
+    <div className="absolute bottom-3 right-3 z-50 flex gap-2">
+      <button
+        onClick={() => {
+          if (mockGames.length > 0) {
+            window.api.simulateGame(mockGames[mockIndex])
+            setMockIndex((i) => (i + 1) % mockGames.length)
+          }
+        }}
+        className="
+          px-3 py-1.5 rounded text-xs font-medium
+          bg-cyan-900/60 text-cyan-300 border border-cyan-700/50
+          hover:bg-cyan-800/60 cursor-pointer
+        "
+      >
+        Sim Game
+      </button>
+      <button
+        onClick={() => window.api.simulateGame(null)}
+        className="
+          px-3 py-1.5 rounded text-xs font-medium
+          bg-slate-800/60 text-slate-400 border border-slate-700/50
+          hover:bg-slate-700/60 cursor-pointer
+        "
+      >
+        Sim Idle
+      </button>
+    </div>
+  )
+}
 
-              {isActive && (
-                <div className="absolute inset-0 bg-black/70 flex items-center justify-center">
-                  <span className="text-cyan-400 text-xl font-bold tracking-widest animate-pulse">
-                    LAUNCHING...
-                  </span>
-                </div>
-              )}
-            </button>
-          )
-        })}
-      </div>
+function App(): React.JSX.Element {
+  const [state, setState] = useState<CompanionState>({ status: 'idle' })
+  const [hideCursor, setHideCursor] = useState(true)
+  const [devMode, setDevMode] = useState(false)
+
+  useEffect(() => {
+    window.api.getDevMode().then((dm) => {
+      setHideCursor(!dm)
+      setDevMode(dm)
+    })
+  }, [])
+
+  // Get initial state
+  useEffect(() => {
+    window.api.getCompanionState().then(setState)
+  }, [])
+
+  // Subscribe to state changes
+  useEffect(() => {
+    const cleanup = window.api.onCompanionStateChanged((newState) => {
+      setState(newState)
+    })
+    return cleanup
+  }, [])
+
+  const handleCloseGame = useCallback(() => {
+    window.api.closeGame()
+  }, [])
+
+  return (
+    <div className={`h-screen w-screen bg-slate-900 ${hideCursor ? 'hide-cursor' : ''}`}>
+      {state.status === 'idle' && <IdleView />}
+      {state.status === 'game-active' && (
+        <ActiveGameView game={state.game} onCloseGame={handleCloseGame} />
+      )}
+      {state.status === 'error' && (
+        <div className="h-full flex items-center justify-center">
+          <span className="text-red-400 text-xl font-bold tracking-widest">{state.message}</span>
+        </div>
+      )}
+      {devMode && <DevControls />}
     </div>
   )
 }
