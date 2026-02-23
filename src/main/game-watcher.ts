@@ -2,6 +2,7 @@ import { exec } from 'child_process'
 import os from 'os'
 import type { GameInfo, CompanionState } from '../shared/types'
 import { lookupGameByRomPath, resolveGameImages } from './launchbox'
+import { resolveControllerMap } from './ai-controls'
 
 const isWindows = os.platform() === 'win32'
 
@@ -37,6 +38,7 @@ const ROM_EXTENSIONS = new Set([
   'chd',
   'pbp',
   'cso',
+  'ciso',
   'ecm',
   // GameCube / Wii
   'gcm',
@@ -130,9 +132,13 @@ function parseRetroArchRom(cmdLine: string): string {
 }
 
 function parseDolphinRom(cmdLine: string): string {
-  // Format: Dolphin.exe --exec="path\to\game.iso" or Dolphin.exe "path\to\game.iso"
+  // Format 1: Dolphin.exe --exec="path\to\game.iso"
   const execMatch = cmdLine.match(/--exec=["']?(.+?)["']?(?:\s+-|$)/i)
   if (execMatch) return execMatch[1].trim().replace(/["']/g, '')
+
+  // Format 2: Dolphin.exe -e "path\to\game.ciso" (short flag used by LaunchBox)
+  const eMatch = cmdLine.match(/-e\s+["']([^"']+)["']/i)
+  if (eMatch) return eMatch[1].trim()
 
   // Fallback: find path with ROM extension
   const paths = extractPathsFromCmdLine(cmdLine)
@@ -177,6 +183,7 @@ let currentState: CompanionState = { status: 'idle' }
 let currentRomPath: string | null = null
 let gameIndex: Map<string, GameInfo> = new Map()
 let onStateChange: StateChangeCallback | null = null
+let simulated = false
 
 function buildWmicQuery(): string {
   const filters = EMULATORS.map((e) => e.wmicFilter).join(' or ')
@@ -218,9 +225,14 @@ function findEmulatorParser(processName: string): EmulatorParser | undefined {
 }
 
 function pollForEmulators(): void {
+  // Don't override simulated game state with real process polling
+  if (simulated) return
+
   const query = buildWmicQuery()
 
   exec(query, { timeout: 5000 }, (error, stdout) => {
+    if (simulated) return
+
     if (error) {
       // No matching processes found — this is normal when no game is running
       if (currentState.status === 'game-active') {
@@ -298,7 +310,24 @@ function pollForEmulators(): void {
       console.log(`[Watcher] Detected unknown game: ${filename} via ${detected.name}`)
     }
 
+    // Send state immediately so UI shows the game right away
     onStateChange?.(currentState)
+
+    // Async: resolve controller map (cache → AI → platform fallback)
+    if (currentState.status === 'game-active') {
+      const { title, platform } = currentState.game
+      resolveControllerMap(title, platform).then((controllerMap) => {
+        if (
+          controllerMap &&
+          currentState.status === 'game-active' &&
+          currentState.game.title === title
+        ) {
+          currentState = { ...currentState, controllerMap }
+          onStateChange?.(currentState)
+          console.log(`[Watcher] Controller map resolved for "${title}"`)
+        }
+      })
+    }
   })
 }
 
@@ -330,7 +359,8 @@ export function getCurrentState(): CompanionState {
   return currentState
 }
 
-export function setCurrentState(state: CompanionState): void {
+export function setCurrentState(state: CompanionState, isSimulated = false): void {
+  simulated = isSimulated && state.status === 'game-active'
   currentState = state
   currentRomPath = null
   onStateChange?.(state)

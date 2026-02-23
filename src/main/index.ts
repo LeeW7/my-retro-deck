@@ -14,6 +14,9 @@ import {
   getActiveEmulatorProcess
 } from './game-watcher'
 import { mockGames } from './dev-mock-game'
+import { ensureNetworkCmdEnabled, sendRetroArchCommand } from './retroarch-net'
+import { isAiConfigured } from './game-controls-cache'
+import { resolveControllerMap } from './ai-controls'
 
 const isWindows = os.platform() === 'win32'
 const devMode = !!process.env.DEV_MODE
@@ -108,13 +111,16 @@ app.whenReady().then(() => {
     console.log('[Dev Mode] Windowed mode enabled (DEV_MODE=1)')
   }
 
-  // --- Build game index ---
+  // --- Build game index & enable RetroArch network commands ---
   const gameIndex = buildGameIndex()
+  ensureNetworkCmdEnabled()
 
   // --- IPC Handlers ---
   ipcMain.handle('get-dev-mode', () => devMode)
 
   ipcMain.handle('get-companion-state', () => getCurrentState())
+
+  ipcMain.handle('get-ai-configured', () => isAiConfigured())
 
   ipcMain.on('close-game', () => {
     const processName = getActiveEmulatorProcess()
@@ -143,16 +149,42 @@ app.whenReady().then(() => {
     })
   })
 
+  ipcMain.on('save-state', () => {
+    console.log('[IPC] Save state requested')
+    sendRetroArchCommand('SAVE_STATE')
+  })
+
+  ipcMain.on('load-state', () => {
+    console.log('[IPC] Load state requested')
+    sendRetroArchCommand('LOAD_STATE')
+  })
+
   // Dev mode: simulate game detection for UI testing
   ipcMain.on('simulate-game', (_event, game: GameInfo | null) => {
     if (!devMode && isWindows) return
 
     const state: CompanionState = game
-      ? { status: 'game-active', game, emulatorProcess: 'mock-emulator.exe' }
+      ? { status: 'game-active', game, emulatorProcess: 'retroarch.exe' }
       : { status: 'idle' }
-    setCurrentState(state)
+    setCurrentState(state, true)
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('companion-state-changed', state)
+    }
+
+    // Async: resolve controller map for simulated game
+    if (game) {
+      resolveControllerMap(game.title, game.platform).then((controllerMap) => {
+        if (controllerMap && mainWindow && !mainWindow.isDestroyed()) {
+          const updated: CompanionState = {
+            status: 'game-active',
+            game,
+            emulatorProcess: 'retroarch.exe',
+            controllerMap
+          }
+          setCurrentState(updated, true)
+          mainWindow.webContents.send('companion-state-changed', updated)
+        }
+      })
     }
   })
 

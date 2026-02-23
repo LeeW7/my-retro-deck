@@ -19,11 +19,21 @@ const api = {
     ipcRenderer.send('close-game')
   },
 
+  saveState: (): void => {
+    ipcRenderer.send('save-state')
+  },
+
+  loadState: (): void => {
+    ipcRenderer.send('load-state')
+  },
+
   simulateGame: (game: GameInfo | null): void => {
     ipcRenderer.send('simulate-game', game)
   },
 
-  getMockGames: (): Promise<GameInfo[]> => ipcRenderer.invoke('get-mock-games')
+  getMockGames: (): Promise<GameInfo[]> => ipcRenderer.invoke('get-mock-games'),
+
+  getAiConfigured: (): Promise<boolean> => ipcRenderer.invoke('get-ai-configured')
 }
 
 if (process.contextIsolated) {

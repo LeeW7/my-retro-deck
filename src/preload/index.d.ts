@@ -9,8 +9,11 @@ declare global {
       getCompanionState: () => Promise<CompanionState>
       onCompanionStateChanged: (callback: (state: CompanionState) => void) => () => void
       closeGame: () => void
+      saveState: () => void
+      loadState: () => void
       simulateGame: (game: GameInfo | null) => void
       getMockGames: () => Promise<GameInfo[]>
+      getAiConfigured: () => Promise<boolean>
     }
   }
 }

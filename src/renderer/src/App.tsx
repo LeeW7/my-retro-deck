@@ -1,19 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
-import type { CompanionState, GameInfo } from '../../shared/types'
-
-function formatPlayTime(seconds: number): string {
-  if (seconds === 0) return ''
-  const hours = Math.floor(seconds / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-  if (hours > 0) return `${hours}h ${minutes}m`
-  return `${minutes}m`
-}
-
-function formatYear(dateStr: string): string {
-  if (!dateStr) return ''
-  const match = dateStr.match(/^\d{4}/)
-  return match ? match[0] : ''
-}
+import type { CompanionState, ControllerPositionMap, GameInfo } from '../../shared/types'
+import GameInfoView from './components/GameInfoView'
+import ControllerReferenceView from './components/ControllerReferenceView'
+import ActionBar from './components/ActionBar'
 
 function IdleView(): React.JSX.Element {
   return (
@@ -27,26 +16,30 @@ function IdleView(): React.JSX.Element {
   )
 }
 
+type ActiveTab = 'info' | 'controls'
+
 function ActiveGameView({
   game,
-  onCloseGame
+  emulatorProcess,
+  controllerMap,
+  onCloseGame,
+  onSaveState,
+  onLoadState
 }: {
   game: GameInfo
+  emulatorProcess: string
+  controllerMap?: ControllerPositionMap
   onCloseGame: () => void
+  onSaveState: () => void
+  onLoadState: () => void
 }): React.JSX.Element {
-  const [imgError, setImgError] = useState(false)
-  const year = formatYear(game.releaseDate)
-  const playTime = formatPlayTime(game.playTime)
+  const [activeTab, setActiveTab] = useState<ActiveTab>('info')
+  const isRetroArch = emulatorProcess.toLowerCase().includes('retroarch')
 
-  const infoPills: string[] = []
-  if (game.developer) infoPills.push(game.developer)
-  if (game.genre) infoPills.push(game.genre.split(';')[0].trim())
-  if (year) infoPills.push(year)
-  if (game.rating) infoPills.push(game.rating)
-
-  const hasBoxArt = game.images.boxFront && !imgError
-  const hasClearLogo = game.images.clearLogo && !imgError
-  const hasAnyImage = hasBoxArt || hasClearLogo
+  const tabs: { id: ActiveTab; label: string }[] = [
+    { id: 'info', label: 'Info' },
+    { id: 'controls', label: 'Controls' }
+  ]
 
   return (
     <div className="h-full flex flex-col relative overflow-hidden">
@@ -61,95 +54,56 @@ function ActiveGameView({
       )}
 
       {/* Content overlay */}
-      <div className="relative z-10 flex flex-col h-full p-6">
-        {/* Header */}
-        <div className="text-center mb-3">
+      <div className="relative z-10 flex flex-col h-full p-4">
+        {/* Compact Header */}
+        <div className="text-center mb-2">
           <span className="text-cyan-400/60 text-xs font-bold tracking-widest uppercase">
             Now Playing
           </span>
+          <h2 className="text-cyan-400 text-lg font-bold tracking-wide truncate mt-0.5">
+            {game.title}
+          </h2>
+          <span className="text-slate-400 text-xs font-medium tracking-wider uppercase">
+            {game.platform}
+          </span>
         </div>
 
-        {/* Box Art / Title Display */}
-        <div className="flex-1 flex items-center justify-center min-h-0 mb-4">
-          {hasBoxArt ? (
-            <img
-              src={game.images.boxFront}
-              alt={game.title}
-              className="max-h-full max-w-[80%] object-contain rounded-lg shadow-2xl shadow-cyan-500/20"
-              onError={() => setImgError(true)}
-            />
-          ) : hasClearLogo ? (
-            <img
-              src={game.images.clearLogo}
-              alt={game.title}
-              className="max-h-[60%] max-w-[80%] object-contain"
-              onError={() => setImgError(true)}
-            />
-          ) : (
-            <div className="flex flex-col items-center justify-center gap-4">
-              <div className="w-20 h-0.5 bg-cyan-400/20 rounded-full" />
-              <h2 className="text-cyan-400 text-3xl font-bold text-center tracking-wide leading-snug px-8">
-                {game.title}
-              </h2>
-              <span className="text-slate-400 text-sm font-medium tracking-wider uppercase">
-                {game.platform}
-              </span>
-              <div className="w-20 h-0.5 bg-cyan-400/20 rounded-full" />
-            </div>
+        {/* Tab Bar */}
+        <div className="flex justify-center gap-1 mb-3">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`
+                px-4 py-1.5 rounded-full text-xs font-bold tracking-wider uppercase
+                transition-all duration-200 cursor-pointer border-2
+                ${
+                  activeTab === tab.id
+                    ? 'border-cyan-400 bg-cyan-400/10 text-cyan-400'
+                    : 'border-slate-600/50 bg-slate-800/50 text-slate-400 hover:border-slate-500'
+                }
+              `}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Tab Content */}
+        <div className="flex-1 min-h-0">
+          {activeTab === 'info' && <GameInfoView game={game} />}
+          {activeTab === 'controls' && (
+            <ControllerReferenceView platformName={game.platform} controllerMap={controllerMap} />
           )}
         </div>
 
-        {/* Game Info — only show title/platform here if we have an image above */}
-        {hasAnyImage && (
-          <div className="text-center space-y-1 mb-3">
-            <h2 className="text-cyan-400 text-xl font-bold tracking-wide">{game.title}</h2>
-            <span className="text-slate-400 text-sm font-medium tracking-wider uppercase">
-              {game.platform}
-            </span>
-          </div>
-        )}
-
-        {/* Info Pills */}
-        {infoPills.length > 0 && (
-          <div className="flex flex-wrap justify-center gap-2 mb-3">
-            {infoPills.map((pill) => (
-              <span
-                key={pill}
-                className="px-3 py-1 rounded-full text-xs font-medium bg-slate-800 text-slate-300 border border-slate-600/50"
-              >
-                {pill}
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* Play Stats */}
-        {(game.playCount > 0 || playTime) && (
-          <div className="flex justify-center gap-4 mb-4 text-xs text-slate-400">
-            {game.playCount > 0 && (
-              <span>
-                Played {game.playCount} time{game.playCount !== 1 ? 's' : ''}
-              </span>
-            )}
-            {playTime && <span>{playTime} total</span>}
-          </div>
-        )}
-
-        {/* Action Bar */}
-        <div className="flex justify-center pt-1">
-          <button
-            onClick={onCloseGame}
-            className="
-              px-6 py-2.5 rounded-full text-sm font-bold tracking-wider uppercase
-              transition-all duration-200 cursor-pointer
-              border-2 border-red-500/50 bg-slate-800 text-red-400
-              hover:border-red-400 hover:shadow-md hover:shadow-red-500/30
-              active:bg-red-500/20
-            "
-          >
-            Close Game
-          </button>
-        </div>
+        {/* Persistent Action Bar */}
+        <ActionBar
+          isRetroArchGame={isRetroArch}
+          onSaveState={onSaveState}
+          onLoadState={onLoadState}
+          onCloseGame={onCloseGame}
+        />
       </div>
     </div>
   )
@@ -223,11 +177,26 @@ function App(): React.JSX.Element {
     window.api.closeGame()
   }, [])
 
+  const handleSaveState = useCallback(() => {
+    window.api.saveState()
+  }, [])
+
+  const handleLoadState = useCallback(() => {
+    window.api.loadState()
+  }, [])
+
   return (
     <div className={`h-screen w-screen bg-slate-900 ${hideCursor ? 'hide-cursor' : ''}`}>
       {state.status === 'idle' && <IdleView />}
       {state.status === 'game-active' && (
-        <ActiveGameView game={state.game} onCloseGame={handleCloseGame} />
+        <ActiveGameView
+          game={state.game}
+          emulatorProcess={state.emulatorProcess}
+          controllerMap={state.controllerMap}
+          onCloseGame={handleCloseGame}
+          onSaveState={handleSaveState}
+          onLoadState={handleLoadState}
+        />
       )}
       {state.status === 'error' && (
         <div className="h-full flex items-center justify-center">
