@@ -33,7 +33,11 @@ const api = {
 
   getMockGames: (): Promise<GameInfo[]> => ipcRenderer.invoke('get-mock-games'),
 
-  getAiConfigured: (): Promise<boolean> => ipcRenderer.invoke('get-ai-configured')
+  getAiConfigured: (): Promise<boolean> => ipcRenderer.invoke('get-ai-configured'),
+
+  saveControlOverride: (gameTitle: string, positionKey: string, label: string): void => {
+    ipcRenderer.send('save-control-override', gameTitle, positionKey, label)
+  }
 }
 
 if (process.contextIsolated) {

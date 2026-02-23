@@ -15,7 +15,7 @@ import {
 } from './game-watcher'
 import { mockGames } from './dev-mock-game'
 import { ensureNetworkCmdEnabled, sendRetroArchCommand } from './retroarch-net'
-import { isAiConfigured } from './game-controls-cache'
+import { isAiConfigured, saveOverride } from './game-controls-cache'
 import { resolveControllerMap } from './ai-controls'
 
 const isWindows = os.platform() === 'win32'
@@ -158,6 +158,13 @@ app.whenReady().then(() => {
     console.log('[IPC] Load state requested')
     sendRetroArchCommand('LOAD_STATE')
   })
+
+  ipcMain.on(
+    'save-control-override',
+    (_event, gameTitle: string, positionKey: string, label: string) => {
+      saveOverride(gameTitle, positionKey, label)
+    }
+  )
 
   // Dev mode: simulate game detection for UI testing
   ipcMain.on('simulate-game', (_event, game: GameInfo | null) => {

@@ -24,7 +24,8 @@ function ActiveGameView({
   controllerMap,
   onCloseGame,
   onSaveState,
-  onLoadState
+  onLoadState,
+  onControlOverride
 }: {
   game: GameInfo
   emulatorProcess: string
@@ -32,6 +33,7 @@ function ActiveGameView({
   onCloseGame: () => void
   onSaveState: () => void
   onLoadState: () => void
+  onControlOverride: (positionKey: keyof ControllerPositionMap, label: string) => void
 }): React.JSX.Element {
   const [activeTab, setActiveTab] = useState<ActiveTab>('info')
   const isRetroArch = emulatorProcess.toLowerCase().includes('retroarch')
@@ -93,7 +95,12 @@ function ActiveGameView({
         <div className="flex-1 min-h-0">
           {activeTab === 'info' && <GameInfoView game={game} />}
           {activeTab === 'controls' && (
-            <ControllerReferenceView platformName={game.platform} controllerMap={controllerMap} />
+            <ControllerReferenceView
+              platformName={game.platform}
+              controllerMap={controllerMap}
+              gameTitle={game.title}
+              onOverride={onControlOverride}
+            />
           )}
         </div>
 
@@ -185,6 +192,22 @@ function App(): React.JSX.Element {
     window.api.loadState()
   }, [])
 
+  const handleControlOverride = useCallback(
+    (positionKey: keyof ControllerPositionMap, label: string) => {
+      if (state.status !== 'game-active') return
+      window.api.saveControlOverride(state.game.title, positionKey, label)
+      // Update local state so the UI reflects the change immediately
+      setState((prev) => {
+        if (prev.status !== 'game-active') return prev
+        return {
+          ...prev,
+          controllerMap: { ...prev.controllerMap, [positionKey]: label }
+        }
+      })
+    },
+    [state]
+  )
+
   return (
     <div className={`h-screen w-screen bg-slate-900 ${hideCursor ? 'hide-cursor' : ''}`}>
       {state.status === 'idle' && <IdleView />}
@@ -196,6 +219,7 @@ function App(): React.JSX.Element {
           onCloseGame={handleCloseGame}
           onSaveState={handleSaveState}
           onLoadState={handleLoadState}
+          onControlOverride={handleControlOverride}
         />
       )}
       {state.status === 'error' && (

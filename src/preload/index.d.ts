@@ -14,6 +14,7 @@ declare global {
       simulateGame: (game: GameInfo | null) => void
       getMockGames: () => Promise<GameInfo[]>
       getAiConfigured: () => Promise<boolean>
+      saveControlOverride: (gameTitle: string, positionKey: string, label: string) => void
     }
   }
 }

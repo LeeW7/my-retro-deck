@@ -303,10 +303,19 @@ The output position keys correspond to a modern controller (8BitDo Pro 3 / Switc
 - start = + button
 - select = − button${coreMappingSection}
 
+CRITICAL: Each label must be the actual in-game ACTION for "${gameTitle}" (what happens when you press the button), NOT the original console button name. Think carefully about the DEFAULT control scheme for this specific game.
+
+Multiple position keys CAN have the same action label if the game maps multiple buttons to the same function. Do not force unique labels.
+
+If you are unsure about a button's function in this specific game, OMIT it rather than guessing. Accuracy matters more than completeness.
+
 Respond with ONLY a JSON object mapping position keys to short action labels (1-2 words max, like "Jump", "Attack", "Move", "Menu"). Only include positions that the game actually uses. Keep labels very short and kid-friendly.
 
-Example for an N64 game:
-{"faceBottom":"Jump","faceLeft":"Punch","triggerL":"Crouch","shoulderR":"Camera","leftStick":"Move","rightStick":"C-Buttons","start":"Pause"}`
+Example for Super Mario 64 (N64):
+{"faceBottom":"Jump","faceLeft":"Punch","triggerL":"Crouch","shoulderR":"Camera","leftStick":"Move","rightStick":"C-Buttons","start":"Pause"}
+
+Example for Super Smash Bros. Melee (GameCube):
+{"faceBottom":"Attack","faceRight":"Jump","faceLeft":"Special","faceTop":"Jump","shoulderR":"Grab","triggerL":"Shield","triggerR":"Shield","leftStick":"Move","rightStick":"Smash","dpad":"Taunt","start":"Pause"}`
 }
 
 function parseResponse(text: string): ControllerPositionMap | null {
@@ -348,8 +357,8 @@ export async function generateGameControls(
 
     const client = new Anthropic({ apiKey, maxRetries: 3 })
     const message = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 300,
+      model: 'claude-sonnet-4-5-20250514',
+      max_tokens: 400,
       messages: [{ role: 'user', content: buildPrompt(gameTitle, platform) }]
     })
 
