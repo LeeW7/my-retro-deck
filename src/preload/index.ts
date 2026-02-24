@@ -37,6 +37,10 @@ const api = {
 
   saveControlOverride: (gameTitle: string, positionKey: string, label: string): void => {
     ipcRenderer.send('save-control-override', gameTitle, positionKey, label)
+  },
+
+  killLauncher: (): void => {
+    ipcRenderer.send('kill-launcher')
   }
 }
 

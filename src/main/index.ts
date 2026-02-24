@@ -166,6 +166,24 @@ app.whenReady().then(() => {
     }
   )
 
+  ipcMain.on('kill-launcher', () => {
+    console.log('[IPC] Kill launcher requested')
+    if (!isWindows) {
+      console.log('[Dev Mode] Would kill BigBox/LaunchBox')
+      return
+    }
+    const targets = ['BigBox.exe', 'LaunchBox.exe']
+    for (const proc of targets) {
+      exec(`taskkill /IM "${proc}" /F`, (error) => {
+        if (error) {
+          console.log(`[Kill Launcher] ${proc} was not running`)
+        } else {
+          console.log(`[Kill Launcher] ${proc} terminated`)
+        }
+      })
+    }
+  })
+
   // Dev mode: simulate game detection for UI testing
   ipcMain.on('simulate-game', (_event, game: GameInfo | null) => {
     if (!devMode && isWindows) return

@@ -3,13 +3,15 @@ interface ActionBarProps {
   onSaveState: () => void
   onLoadState: () => void
   onCloseGame: () => void
+  onKillLauncher: () => void
 }
 
 function ActionBar({
   isRetroArchGame,
   onSaveState,
   onLoadState,
-  onCloseGame
+  onCloseGame,
+  onKillLauncher
 }: ActionBarProps): React.JSX.Element {
   return (
     <div className="flex justify-center gap-3 pt-2 pb-1">
@@ -52,6 +54,18 @@ function ActionBar({
         "
       >
         Close Game
+      </button>
+      <button
+        onClick={onKillLauncher}
+        className="
+          px-5 py-2.5 rounded-full text-sm font-bold tracking-wider uppercase
+          transition-all duration-200 cursor-pointer
+          border-2 border-amber-500/50 bg-slate-800 text-amber-400
+          hover:border-amber-400 hover:shadow-md hover:shadow-amber-500/30
+          active:bg-amber-500/20
+        "
+      >
+        Kill Launcher
       </button>
     </div>
   )

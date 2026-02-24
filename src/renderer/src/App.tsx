@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import type { CompanionState, ControllerPositionMap, GameInfo } from '../../shared/types'
 import GameInfoView from './components/GameInfoView'
 import ControllerReferenceView from './components/ControllerReferenceView'
+import ArtworkView from './components/ArtworkView'
 import ActionBar from './components/ActionBar'
 
 function IdleView(): React.JSX.Element {
@@ -16,7 +17,10 @@ function IdleView(): React.JSX.Element {
   )
 }
 
-type ActiveTab = 'info' | 'controls'
+type ActiveTab = 'info' | 'controls' | 'artwork'
+
+const CYCLE_INTERVAL = 8000
+const PAUSE_DURATION = 30000
 
 function ActiveGameView({
   game,
@@ -25,7 +29,8 @@ function ActiveGameView({
   onCloseGame,
   onSaveState,
   onLoadState,
-  onControlOverride
+  onControlOverride,
+  onKillLauncher
 }: {
   game: GameInfo
   emulatorProcess: string
@@ -34,14 +39,65 @@ function ActiveGameView({
   onSaveState: () => void
   onLoadState: () => void
   onControlOverride: (positionKey: keyof ControllerPositionMap, label: string) => void
+  onKillLauncher: () => void
 }): React.JSX.Element {
   const [activeTab, setActiveTab] = useState<ActiveTab>('info')
+  const [autoCycling, setAutoCycling] = useState(true)
+  const [hasShownControls, setHasShownControls] = useState(false)
+  const pauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isRetroArch = emulatorProcess.toLowerCase().includes('retroarch')
 
   const tabs: { id: ActiveTab; label: string }[] = [
     { id: 'info', label: 'Info' },
-    { id: 'controls', label: 'Controls' }
+    { id: 'controls', label: 'Controls' },
+    { id: 'artwork', label: 'Artwork' }
   ]
+
+  // Auto-switch to controls when controllerMap first arrives (via async callback)
+  useEffect(() => {
+    if (!controllerMap || hasShownControls || !autoCycling) return
+    const timer = setTimeout(() => {
+      setHasShownControls(true)
+      setActiveTab('controls')
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [controllerMap, hasShownControls, autoCycling])
+
+  // Auto-cycle through tabs
+  useEffect(() => {
+    if (!autoCycling) return
+
+    const timer = setInterval(() => {
+      setActiveTab((prev) => {
+        if (prev === 'info') return 'controls'
+        if (prev === 'controls') return 'artwork'
+        return 'info'
+      })
+    }, CYCLE_INTERVAL)
+
+    return () => clearInterval(timer)
+  }, [autoCycling])
+
+  // Handle manual tab interaction — pause cycling, resume after timeout
+  const handleTabClick = useCallback((tabId: ActiveTab) => {
+    setActiveTab(tabId)
+    setAutoCycling(false)
+
+    // Clear any existing resume timer
+    if (pauseTimerRef.current) clearTimeout(pauseTimerRef.current)
+
+    // Resume cycling after pause duration
+    pauseTimerRef.current = setTimeout(() => {
+      setAutoCycling(true)
+    }, PAUSE_DURATION)
+  }, [])
+
+  // Clean up pause timer on unmount
+  useEffect(() => {
+    return () => {
+      if (pauseTimerRef.current) clearTimeout(pauseTimerRef.current)
+    }
+  }, [])
 
   return (
     <div className="h-full flex flex-col relative overflow-hidden">
@@ -75,7 +131,7 @@ function ActiveGameView({
           {tabs.map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => handleTabClick(tab.id)}
               className={`
                 px-4 py-1.5 rounded-full text-xs font-bold tracking-wider uppercase
                 transition-all duration-200 cursor-pointer border-2
@@ -102,6 +158,7 @@ function ActiveGameView({
               onOverride={onControlOverride}
             />
           )}
+          {activeTab === 'artwork' && <ArtworkView images={game.images} title={game.title} />}
         </div>
 
         {/* Persistent Action Bar */}
@@ -110,6 +167,7 @@ function ActiveGameView({
           onSaveState={onSaveState}
           onLoadState={onLoadState}
           onCloseGame={onCloseGame}
+          onKillLauncher={onKillLauncher}
         />
       </div>
     </div>
@@ -192,6 +250,10 @@ function App(): React.JSX.Element {
     window.api.loadState()
   }, [])
 
+  const handleKillLauncher = useCallback(() => {
+    window.api.killLauncher()
+  }, [])
+
   const handleControlOverride = useCallback(
     (positionKey: keyof ControllerPositionMap, label: string) => {
       if (state.status !== 'game-active') return
@@ -213,6 +275,7 @@ function App(): React.JSX.Element {
       {state.status === 'idle' && <IdleView />}
       {state.status === 'game-active' && (
         <ActiveGameView
+          key={state.game.id}
           game={state.game}
           emulatorProcess={state.emulatorProcess}
           controllerMap={state.controllerMap}
@@ -220,6 +283,7 @@ function App(): React.JSX.Element {
           onSaveState={handleSaveState}
           onLoadState={handleLoadState}
           onControlOverride={handleControlOverride}
+          onKillLauncher={handleKillLauncher}
         />
       )}
       {state.status === 'error' && (

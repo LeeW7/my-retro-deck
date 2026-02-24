@@ -15,6 +15,7 @@ declare global {
       getMockGames: () => Promise<GameInfo[]>
       getAiConfigured: () => Promise<boolean>
       saveControlOverride: (gameTitle: string, positionKey: string, label: string) => void
+      killLauncher: () => void
     }
   }
 }
