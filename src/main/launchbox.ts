@@ -123,15 +123,32 @@ export function lookupGameByRomPath(
 
 // --- Game Images ---
 
+/**
+ * Normalize a string for fuzzy filename matching.
+ * Strips characters that are invalid in Windows filenames (: ? * < > | " / \)
+ * and collapses punctuation/whitespace so that titles like
+ * "The Legend of Zelda: The Wind Waker" match files named
+ * "The Legend of Zelda - The Wind Waker-01.png".
+ */
+function normalizeForMatch(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 function findImageInDir(dir: string, titlePrefix: string): string {
   if (!existsSync(dir)) return ''
 
+  const normalizedTitle = normalizeForMatch(titlePrefix)
   const entries = readdirSync(dir, { withFileTypes: true })
 
   // Check files in this directory first
   for (const entry of entries) {
     if (entry.isFile() && IMAGE_EXTENSIONS.test(entry.name)) {
-      if (entry.name.toLowerCase().startsWith(titlePrefix)) {
+      const normalizedName = normalizeForMatch(entry.name)
+      if (normalizedName.startsWith(normalizedTitle)) {
         return join(dir, entry.name)
       }
     }
@@ -144,7 +161,8 @@ function findImageInDir(dir: string, titlePrefix: string): string {
       try {
         const subFiles = readdirSync(subDir).filter((f) => IMAGE_EXTENSIONS.test(f))
         for (const f of subFiles) {
-          if (f.toLowerCase().startsWith(titlePrefix)) {
+          const normalizedName = normalizeForMatch(f)
+          if (normalizedName.startsWith(normalizedTitle)) {
             return join(subDir, f)
           }
         }
@@ -180,7 +198,15 @@ export function resolveGameImages(title: string, platform: string): GameImages {
     const found = findImageInDir(dir, titlePrefix)
     if (found) {
       images[key] = toAssetUrl(found)
+      console.log(`[Images] ${key}: ${found}`)
     }
+  }
+
+  const foundCount = Object.values(images).filter(Boolean).length
+  if (foundCount === 0) {
+    console.log(`[Images] No images found for "${title}" in ${imagesBase}`)
+  } else {
+    console.log(`[Images] Found ${foundCount}/4 image types for "${title}"`)
   }
 
   return images
