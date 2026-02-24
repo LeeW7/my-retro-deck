@@ -68,23 +68,27 @@ function readCacheDb(): Record<string, ControllerPositionMap> {
   return raw.entries ?? {}
 }
 
-/** Check manual overrides first, then AI-generated cache */
+/** Check AI cache, then layer manual overrides on top */
 export function getGameControls(gameTitle: string): ControllerPositionMap | null {
-  // Priority 1: manual overrides (unversioned, always honored)
-  const overrides = readJsonFile<ControlsDb>(OVERRIDES_PATH)
-  if (overrides?.[gameTitle]) {
-    console.log(`[Controls] Using manual override for "${gameTitle}"`)
-    return overrides[gameTitle]
-  }
-
-  // Priority 2: AI-generated cache (versioned)
   const cache = readCacheDb()
-  if (cache[gameTitle]) {
-    console.log(`[Controls] Cache hit for "${gameTitle}"`)
-    return cache[gameTitle]
+  const overrides = readJsonFile<ControlsDb>(OVERRIDES_PATH)
+  const cached = cache[gameTitle] ?? null
+  const overridden = overrides?.[gameTitle] ?? null
+
+  if (!cached && !overridden) return null
+
+  if (cached && overridden) {
+    console.log(`[Controls] Cache hit + overrides for "${gameTitle}"`)
+    return { ...cached, ...overridden }
   }
 
-  return null
+  if (overridden) {
+    console.log(`[Controls] Using manual override for "${gameTitle}"`)
+    return overridden
+  }
+
+  console.log(`[Controls] Cache hit for "${gameTitle}"`)
+  return cached
 }
 
 /** Save AI-generated controls to cache */
