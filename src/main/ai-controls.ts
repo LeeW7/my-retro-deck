@@ -357,7 +357,7 @@ export async function generateGameControls(
 
     const client = new Anthropic({ apiKey, maxRetries: 3 })
     const message = await client.messages.create({
-      model: 'claude-sonnet-4-5-20250514',
+      model: 'claude-sonnet-4-5-20250929',
       max_tokens: 400,
       messages: [{ role: 'user', content: buildPrompt(gameTitle, platform) }]
     })
