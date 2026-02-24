@@ -1,17 +1,30 @@
 import { useState, useEffect } from 'react'
 import type { GameImages } from '../../../shared/types'
 
-/** Collect all non-empty image URLs from game images */
-function collectImages(images: GameImages): string[] {
-  const urls: string[] = []
-  if (images.screenshot) urls.push(images.screenshot)
-  if (images.boxFront) urls.push(images.boxFront)
-  if (images.clearLogo) urls.push(images.clearLogo)
-  return urls
+interface ArtworkEntry {
+  url: string
+  label: string
+}
+
+/** Collect gallery-worthy images — prioritize screenshots & fanart over identity images */
+function collectArtwork(images: GameImages): ArtworkEntry[] {
+  const entries: ArtworkEntry[] = []
+
+  // Primary gallery content: screenshots and fanart
+  if (images.screenshot) entries.push({ url: images.screenshot, label: 'Screenshot' })
+  if (images.fanartBackground) entries.push({ url: images.fanartBackground, label: 'Fan Art' })
+
+  // Fallback: if no screenshot/fanart, show box art so the tab isn't empty
+  if (entries.length === 0) {
+    if (images.boxFront) entries.push({ url: images.boxFront, label: 'Box Art' })
+    if (images.clearLogo) entries.push({ url: images.clearLogo, label: 'Logo' })
+  }
+
+  return entries
 }
 
 function ArtworkView({ images, title }: { images: GameImages; title: string }): React.JSX.Element {
-  const artworks = collectImages(images)
+  const artworks = collectArtwork(images)
   const [currentIndex, setCurrentIndex] = useState(0)
   const [imgError, setImgError] = useState(false)
 
@@ -35,17 +48,18 @@ function ArtworkView({ images, title }: { images: GameImages; title: string }): 
     )
   }
 
-  const currentUrl = artworks[currentIndex % artworks.length]
+  const current = artworks[currentIndex % artworks.length]
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center min-h-0 relative">
-      <div className="flex-1 flex items-center justify-center min-h-0 w-full">
+      {/* Image */}
+      <div className="flex-1 flex items-center justify-center min-h-0 w-full px-2">
         {!imgError ? (
           <img
-            key={currentUrl}
-            src={currentUrl}
-            alt={`${title} artwork`}
-            className="max-h-full max-w-[90%] object-contain rounded-lg shadow-2xl shadow-cyan-500/20 animate-fade-in"
+            key={current.url}
+            src={current.url}
+            alt={`${title} — ${current.label}`}
+            className="max-h-full max-w-full object-contain rounded-lg shadow-2xl shadow-cyan-500/20 animate-fade-in"
             onError={() => setImgError(true)}
           />
         ) : (
@@ -53,19 +67,24 @@ function ArtworkView({ images, title }: { images: GameImages; title: string }): 
         )}
       </div>
 
-      {/* Image indicator dots */}
-      {artworks.length > 1 && (
-        <div className="flex justify-center gap-1.5 mt-2">
-          {artworks.map((_, i) => (
-            <div
-              key={i}
-              className={`w-1.5 h-1.5 rounded-full transition-all duration-300 ${
-                i === currentIndex % artworks.length ? 'bg-cyan-400 scale-125' : 'bg-slate-600'
-              }`}
-            />
-          ))}
-        </div>
-      )}
+      {/* Image label + indicator dots */}
+      <div className="flex flex-col items-center gap-1 mt-2">
+        <span className="text-slate-500 text-[10px] font-medium tracking-widest uppercase">
+          {current.label}
+        </span>
+        {artworks.length > 1 && (
+          <div className="flex justify-center gap-1.5">
+            {artworks.map((_, i) => (
+              <div
+                key={i}
+                className={`w-1.5 h-1.5 rounded-full transition-all duration-300 ${
+                  i === currentIndex % artworks.length ? 'bg-cyan-400 scale-125' : 'bg-slate-600'
+                }`}
+              />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
